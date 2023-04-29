@@ -318,12 +318,12 @@ fn get_judge() -> Box<dyn Judge> {
 }
 
 fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: usize) -> Action {
-    if turn < 80 {
-        return Action::Collaboration;
+    if turn < 15 {
+        return Action::Money;
     }
 
     if turn >= 250 || !state.can_construct() {
-        return Action::Money;
+        return Action::Collaboration;
     }
 
     for &(p, q) in &blueprint.candidates {
