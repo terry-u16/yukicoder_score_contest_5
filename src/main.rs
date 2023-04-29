@@ -1,11 +1,31 @@
-use std::{
-    fmt::Display,
-    io::{stdout, Write},
-};
+use std::fmt::Display;
+use std::io::Write;
 
 use grid::{inv, Coordinate, Map2d, ADJACENTS};
+use judge::{OnlineJudge, SelfJudge};
 
-use crate::rand::Xoshiro256;
+use crate::{judge::Judge, rand::Xoshiro256};
+
+pub trait ChangeMinMax {
+    fn change_min(&mut self, v: Self) -> bool;
+    fn change_max(&mut self, v: Self) -> bool;
+}
+
+impl<T: PartialOrd> ChangeMinMax for T {
+    fn change_min(&mut self, v: T) -> bool {
+        *self > v && {
+            *self = v;
+            true
+        }
+    }
+
+    fn change_max(&mut self, v: T) -> bool {
+        *self < v && {
+            *self = v;
+            true
+        }
+    }
+}
 
 macro_rules! get {
       ($t:ty) => {
@@ -169,17 +189,6 @@ impl State {
     fn can_construct(&self) -> bool {
         self.money >= self.calc_construction_cost()
     }
-
-    fn update(&mut self) {
-        let (money, collaborator) = get!(i64, i64);
-
-        if money == -1 && collaborator == -1 {
-            panic!();
-        }
-
-        self.money = money;
-        self.collaborator = collaborator;
-    }
 }
 
 enum Action {
@@ -227,21 +236,32 @@ impl Display for Action {
 }
 
 fn main() {
-    let input = Input::read_input();
     let mut state = State::init();
+    let mut judge = get_judge();
+    let input = judge.read_input();
 
     for turn in 0..input.t {
-        state.update();
+        judge.update_state(&mut state);
         let action = get_action(&input, &state, turn);
         action.apply(&mut state);
-        println!("{}", action);
-        stdout().flush().unwrap();
+        judge.apply(action);
+    }
+}
+
+fn get_judge() -> Box<dyn Judge> {
+    match std::env::var("LOCAL") {
+        Ok(_) => Box::new(SelfJudge::new()),
+        Err(_) => Box::new(OnlineJudge),
     }
 }
 
 fn get_action(input: &Input, state: &State, turn: usize) -> Action {
-    if turn >= 350 || !state.can_construct() {
+    if turn < 70 {
         return Action::Collaboration;
+    }
+
+    if turn >= 350 || !state.can_construct() {
+        return Action::Money;
     }
 
     let mut candidates = vec![];
@@ -281,7 +301,158 @@ fn get_action(input: &Input, state: &State, turn: usize) -> Action {
         }
     }
 
-    Action::Collaboration
+    Action::Money
+}
+
+mod judge {
+    use std::{
+        cmp::Reverse,
+        collections::BinaryHeap,
+        io::{stdout, Write},
+    };
+
+    use crate::{
+        grid::{inv, Coordinate, Map2d, ADJACENTS},
+        Action, ChangeMinMax, Input, State, N,
+    };
+
+    pub(crate) trait Judge {
+        fn read_input(&mut self) -> Input;
+        fn update_state(&mut self, state: &mut State);
+        fn apply(&mut self, action: Action);
+    }
+
+    pub(crate) struct OnlineJudge;
+
+    impl Judge for OnlineJudge {
+        fn read_input(&mut self) -> Input {
+            Input::read_input()
+        }
+
+        fn update_state(&mut self, state: &mut State) {
+            let (money, collaborator) = get!(i64, i64);
+
+            if money == -1 && collaborator == -1 {
+                panic!();
+            }
+
+            state.money = money;
+            state.collaborator = collaborator;
+        }
+
+        fn apply(&mut self, action: Action) {
+            println!("{}", action);
+            stdout().flush().unwrap();
+        }
+    }
+
+    pub(crate) struct SelfJudge {
+        input: Input,
+        state: State,
+        turn: usize,
+    }
+
+    impl SelfJudge {
+        pub(crate) fn new() -> Self {
+            let input = Input {
+                n: 0,
+                t: 0,
+                people: vec![],
+            };
+            let state = State::init();
+            Self {
+                input,
+                state,
+                turn: 0,
+            }
+        }
+    }
+
+    impl Judge for SelfJudge {
+        fn read_input(&mut self) -> Input {
+            self.input = Input::read_input();
+            self.input.clone()
+        }
+
+        fn update_state(&mut self, state: &mut State) {
+            self.turn += 1;
+            eprintln!("[TURN {:3}]", self.turn);
+
+            let mut distances = Map2d::new(vec![Map2d::new(vec![], N); N * N], N);
+
+            for row0 in 0..N {
+                for col0 in 0..N {
+                    let mut dists = Map2d::new(vec![std::i32::MAX / 2; N * N], N);
+                    let mut queue = BinaryHeap::new();
+                    dists[Coordinate::new(row0, col0)] = 0;
+                    queue.push(Reverse((0, Coordinate::new(row0, col0))));
+
+                    while let Some(Reverse((dist, c))) = queue.pop() {
+                        if dist > dists[c] {
+                            continue;
+                        }
+
+                        for dir in 0..4 {
+                            let next = c + ADJACENTS[dir];
+                            let next_cost = dist + if self.state.map[c][dir] { 223 } else { 1000 };
+
+                            if next.in_map(N) && dists[next].change_min(next_cost) {
+                                queue.push(Reverse((next_cost, next)));
+                            }
+                        }
+                    }
+
+                    distances[Coordinate::new(row0, col0)] = dists;
+                }
+            }
+
+            for &person in &self.input.people {
+                let dist = distances[person.home][person.company];
+
+                for count in 0.. {
+                    let remain = dist - 223 * count;
+                    if remain % 1000 == 0 {
+                        self.state.money += 60 * count as i64;
+                        break;
+                    }
+                }
+            }
+
+            eprintln!("money: {}", self.state.money);
+
+            state.money = self.state.money;
+            state.collaborator = self.state.collaborator;
+        }
+
+        fn apply(&mut self, action: Action) {
+            eprintln!("action: {}", action);
+
+            match action {
+                Action::Construct(p, q) => {
+                    let cost = self.state.calc_construction_cost();
+                    if self.state.money < cost {
+                        panic!();
+                    }
+
+                    self.state.money -= cost;
+
+                    for dir in 0..4 {
+                        if p + ADJACENTS[dir] == q {
+                            self.state.map[p][dir] = true;
+                            self.state.map[q][inv(dir)] = true;
+                            return;
+                        }
+                    }
+                }
+                Action::Collaboration => {
+                    self.state.collaborator += 1;
+                }
+                Action::Money => {
+                    self.state.money += 50000;
+                }
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
