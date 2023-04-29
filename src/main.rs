@@ -1,5 +1,6 @@
-use std::fmt::Display;
+use std::cmp::Reverse;
 use std::io::Write;
+use std::{collections::BinaryHeap, fmt::Display};
 
 use grid::{inv, Coordinate, Map2d, ADJACENTS};
 use judge::{OnlineJudge, SelfJudge};
@@ -239,10 +240,12 @@ fn main() {
     let mut state = State::init();
     let mut judge = get_judge();
     let input = judge.read_input();
+    let blueprint = annealing(&input, AnnealingState::new(), 1.5);
+    eprintln!("{}", blueprint.count);
 
     for turn in 0..input.t {
         judge.update_state(&mut state);
-        let action = get_action(&input, &state, turn);
+        let action = get_action(&input, &state, &blueprint, turn);
         action.apply(&mut state);
         judge.apply(action);
     }
@@ -255,7 +258,7 @@ fn get_judge() -> Box<dyn Judge> {
     }
 }
 
-fn get_action(input: &Input, state: &State, turn: usize) -> Action {
+fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: usize) -> Action {
     if turn < 70 {
         return Action::Collaboration;
     }
@@ -266,15 +269,15 @@ fn get_action(input: &Input, state: &State, turn: usize) -> Action {
 
     let mut candidates = vec![];
 
-    for &row in &[2, 6, 11] {
-        for col in 2..10 {
-            candidates.push((Coordinate::new(row, col), Coordinate::new(row, col + 1)));
-        }
-    }
+    for row in 0..N {
+        for col in 0..N {
+            let c = Coordinate::new(row, col);
 
-    for &col in &[2, 6, 11] {
-        for row in 2..10 {
-            candidates.push((Coordinate::new(row, col), Coordinate::new(row + 1, col)));
+            for &dir in &[1, 2] {
+                if blueprint.map[c][dir] {
+                    candidates.push((c, c + ADJACENTS[dir]));
+                }
+            }
         }
     }
 
@@ -302,6 +305,188 @@ fn get_action(input: &Input, state: &State, turn: usize) -> Action {
     }
 
     Action::Money
+}
+
+const MAX_HIGHWAY: usize = 70;
+
+#[derive(Debug, Clone)]
+struct AnnealingState {
+    map: Map2d<[bool; 4]>,
+    count: usize,
+}
+
+impl AnnealingState {
+    fn new() -> Self {
+        let mut map = Map2d::new(vec![[false; 4]; N * N], N);
+
+        for &row in &[2, 6, 11] {
+            for col in 2..10 {
+                let c = Coordinate::new(row, col);
+                map[c][1] = true;
+                map[c + ADJACENTS[1]][3] = true;
+            }
+        }
+
+        for &col in &[2, 6, 11] {
+            for row in 2..10 {
+                let c = Coordinate::new(row, col);
+                map[c][2] = true;
+                map[c + ADJACENTS[2]][0] = true;
+            }
+        }
+
+        let mut count = 0;
+
+        for row in 0..N {
+            for col in 0..N {
+                for &dir in &[1, 2] {
+                    if map[Coordinate::new(row, col)][dir] {
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        Self { map, count }
+    }
+
+    fn calc_score(&self, input: &Input) -> i64 {
+        let mut distances = Map2d::new(vec![Map2d::new(vec![], N); N * N], N);
+        let mut queue = BinaryHeap::new();
+
+        for row0 in 0..N {
+            for col0 in 0..N {
+                let mut dists = Map2d::new(vec![std::i32::MAX / 2; N * N], N);
+                queue.clear();
+                dists[Coordinate::new(row0, col0)] = 0;
+                queue.push(Reverse((0, Coordinate::new(row0, col0))));
+
+                while let Some(Reverse((dist, c))) = queue.pop() {
+                    if dist > dists[c] {
+                        continue;
+                    }
+
+                    for dir in 0..4 {
+                        let next = c + ADJACENTS[dir];
+                        let next_cost = dist + if self.map[c][dir] { 223 } else { 1000 };
+
+                        if next.in_map(N) && dists[next].change_min(next_cost) {
+                            queue.push(Reverse((next_cost, next)));
+                        }
+                    }
+                }
+
+                distances[Coordinate::new(row0, col0)] = dists;
+            }
+        }
+
+        let mut score = 0;
+
+        for &person in &input.people {
+            let dist = distances[person.home][person.company];
+
+            for count in 0.. {
+                let remain = dist - 223 * count;
+                if remain % 1000 == 0 {
+                    score += 60 * count as i64;
+                    break;
+                }
+            }
+        }
+
+        score
+    }
+
+    fn can_flip(&self, target: Coordinate, dir: usize) -> bool {
+        let next = target + ADJACENTS[dir];
+        next.in_map(N) && (self.count < MAX_HIGHWAY || self.map[target][dir])
+    }
+
+    fn flip(&mut self, target: Coordinate, dir: usize) {
+        let next = target + ADJACENTS[dir];
+        if self.map[target][dir] {
+            self.count -= 1;
+        } else {
+            self.count += 1;
+        }
+
+        self.map[target][dir] ^= true;
+        self.map[next][inv(dir)] ^= true;
+    }
+}
+
+fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> AnnealingState {
+    let mut solution = initial_solution;
+    let mut best_solution = solution.clone();
+    let mut current_score = solution.calc_score(input);
+    let mut best_score = current_score;
+    let init_score = current_score;
+
+    let mut all_iter = 0;
+    let mut valid_iter = 0;
+    let mut accepted_count = 0;
+    let mut update_count = 0;
+    let mut rng = Xoshiro256::new(42);
+
+    let duration_inv = 1.0 / duration;
+    let since = std::time::Instant::now();
+
+    let temp0 = 3e4;
+    let temp1 = 3e2;
+    let mut inv_temp = 1.0 / temp0;
+
+    loop {
+        all_iter += 1;
+        if (all_iter & ((1 << 4) - 1)) == 0 {
+            let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
+            let temp = f64::powf(temp0, 1.0 - time) * f64::powf(temp1, time);
+            inv_temp = 1.0 / temp;
+
+            if time >= 1.0 {
+                break;
+            }
+        }
+
+        // 変形
+        let target = Coordinate::new(rng.gen_usize(0, N), rng.gen_usize(0, N));
+        let dir = rng.gen_usize(1, 3);
+
+        if !solution.can_flip(target, dir) {
+            continue;
+        }
+
+        solution.flip(target, dir);
+
+        // スコア計算
+        let new_score = solution.calc_score(input);
+        let score_diff = new_score - current_score;
+
+        if score_diff >= 0 || rng.gen_bool(f64::exp(score_diff as f64 * inv_temp)) {
+            // 解の更新
+            current_score = new_score;
+            accepted_count += 1;
+
+            if best_score.change_max(current_score) {
+                best_solution = solution.clone();
+                update_count += 1;
+            }
+        } else {
+            solution.flip(target, dir);
+        }
+
+        valid_iter += 1;
+    }
+
+    eprintln!("===== annealing =====");
+    eprintln!("init score : {}", init_score);
+    eprintln!("score      : {}", best_score);
+    eprintln!("all iter   : {}", all_iter);
+    eprintln!("valid iter : {}", valid_iter);
+    eprintln!("accepted   : {}", accepted_count);
+    eprintln!("updated    : {}", update_count);
+    eprintln!("");
+
+    best_solution
 }
 
 mod judge {
