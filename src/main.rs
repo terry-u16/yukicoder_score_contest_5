@@ -138,10 +138,9 @@ impl Input {
     fn read_input() -> Input {
         let (n, t) = get!(usize, usize);
         let mut people = vec![];
-        let mut sampled_people = vec![];
-        let mut sampled_houses = HashSet::new();
+        let mut counts = Map2d::new(vec![0; N * N], N);
 
-        for i in 0..n {
+        for _ in 0..n {
             let (r0, c0, r1, c1) = get!(usize, usize, usize, usize);
             let mut c0 = Coordinate::new(r0 - 1, c0 - 1);
             let mut c1 = Coordinate::new(r1 - 1, c1 - 1);
@@ -151,10 +150,28 @@ impl Input {
             }
 
             people.push(Person::new(c0, c1));
+            counts[c0] += 1;
+            counts[c1] += 1;
+        }
 
-            if i % 50 == 0 {
-                sampled_houses.insert(c0);
+        let mut candidates = vec![];
+
+        for row in 0..N {
+            for col in 0..N {
+                let c = Coordinate::new(row, col);
+                candidates.push(c);
             }
+        }
+
+        const TARGET_COUNT: usize = 30;
+        candidates.sort_unstable_by_key(|c| Reverse(counts[*c]));
+        candidates.truncate(TARGET_COUNT);
+
+        let mut sampled_people = vec![];
+        let mut sampled_houses = HashSet::new();
+
+        for &c in &candidates {
+            sampled_houses.insert(c);
         }
 
         for &person in &people {
@@ -285,7 +302,7 @@ fn get_judge() -> Box<dyn Judge> {
 }
 
 fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: usize) -> Action {
-    if turn < 70 {
+    if turn < 100 {
         return Action::Collaboration;
     }
 
