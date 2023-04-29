@@ -240,24 +240,44 @@ fn main() {
 }
 
 fn get_action(input: &Input, state: &State, turn: usize) -> Action {
-    if turn >= 350 {
-        return Action::Money;
-    }
-
-    if !state.can_construct() {
+    if turn >= 350 || !state.can_construct() {
         return Action::Collaboration;
     }
 
-    let mut current = [Coordinate::new(7, 6); 4];
+    let mut candidates = vec![];
 
-    for _ in 0..N {
-        for dir in 0..4 {
-            let last = current[dir];
-            current[dir] = current[dir] + ADJACENTS[dir];
+    for &row in &[2, 6, 11] {
+        for col in 2..10 {
+            candidates.push((Coordinate::new(row, col), Coordinate::new(row, col + 1)));
+        }
+    }
 
-            if current[dir].in_map(N) && !state.map[current[dir]][inv(dir)] {
-                return Action::Construct(current[dir], last);
+    for &col in &[2, 6, 11] {
+        for row in 2..10 {
+            candidates.push((Coordinate::new(row, col), Coordinate::new(row + 1, col)));
+        }
+    }
+
+    const CENTER: Coordinate = Coordinate::new(6, 6);
+    candidates.sort_unstable();
+    candidates.dedup();
+    candidates.sort_by_key(|(p, q)| p.dist(&CENTER).min(q.dist(&CENTER)));
+
+    for &(p, q) in &candidates {
+        let mut dir = !0;
+
+        for d in 0..4 {
+            let adj = ADJACENTS[d];
+            let next = p + adj;
+
+            if next == q {
+                dir = d;
+                break;
             }
+        }
+
+        if !state.map[p][dir] {
+            return Action::Construct(p, q);
         }
     }
 
