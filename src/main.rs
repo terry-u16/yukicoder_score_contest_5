@@ -267,7 +267,7 @@ fn main() {
     let mut state = State::init();
     let mut judge = get_judge();
     let input = judge.read_input();
-    let blueprint = annealing(&input, AnnealingState::new(), 1.5);
+    let blueprint = annealing(&input, AnnealingState::new(), 1.8);
 
     for turn in 0..input.t {
         judge.update_state(&mut state);
@@ -439,6 +439,94 @@ impl AnnealingState {
     }
 }
 
+trait Neighbor {
+    fn apply(&self, input: &Input, state: &mut AnnealingState);
+    fn rollback(&self, input: &Input, state: &mut AnnealingState);
+    fn can_apply(&self, input: &Input, state: &AnnealingState) -> bool;
+}
+
+struct FlipOne {
+    target: Coordinate,
+    dir: usize,
+}
+
+impl FlipOne {
+    fn new(target: Coordinate, dir: usize) -> Self {
+        Self { target, dir }
+    }
+}
+
+impl Neighbor for FlipOne {
+    fn apply(&self, input: &Input, state: &mut AnnealingState) {
+        state.flip(self.target, self.dir);
+    }
+
+    fn rollback(&self, input: &Input, state: &mut AnnealingState) {
+        state.flip(self.target, self.dir);
+    }
+
+    fn can_apply(&self, input: &Input, state: &AnnealingState) -> bool {
+        state.can_flip(self.target, self.dir)
+    }
+}
+
+struct FlipTwo {
+    target0: Coordinate,
+    dir0: usize,
+    target1: Coordinate,
+    dir1: usize,
+}
+
+impl FlipTwo {
+    fn new(target0: Coordinate, dir0: usize, target1: Coordinate, dir1: usize) -> Self {
+        Self {
+            target0,
+            dir0,
+            target1,
+            dir1,
+        }
+    }
+}
+
+impl Neighbor for FlipTwo {
+    fn apply(&self, input: &Input, state: &mut AnnealingState) {
+        state.flip(self.target0, self.dir0);
+        state.flip(self.target1, self.dir1);
+    }
+
+    fn rollback(&self, input: &Input, state: &mut AnnealingState) {
+        state.flip(self.target0, self.dir0);
+        state.flip(self.target1, self.dir1);
+    }
+
+    fn can_apply(&self, input: &Input, state: &AnnealingState) -> bool {
+        !(self.target0 == self.target1 && self.dir0 == self.dir1)
+            && (state.map[self.target0][self.dir0] ^ state.map[self.target1][self.dir1])
+    }
+}
+
+fn gen_target(rng: &mut Xoshiro256) -> (Coordinate, usize) {
+    loop {
+        let target = Coordinate::new(rng.gen_usize(0, N), rng.gen_usize(0, N));
+        let dir = rng.gen_usize(1, 3);
+
+        if !(target.row == N - 1 && dir == 2) && !(target.col == N - 1 && dir == 1) {
+            return (target, dir);
+        }
+    }
+}
+
+fn gen_neighbor(rng: &mut Xoshiro256) -> Box<dyn Neighbor> {
+    if rng.gen_bool(0.05) {
+        let (target, dir) = gen_target(rng);
+        Box::new(FlipOne::new(target, dir))
+    } else {
+        let (target0, dir0) = gen_target(rng);
+        let (target1, dir1) = gen_target(rng);
+        Box::new(FlipTwo::new(target0, dir0, target1, dir1))
+    }
+}
+
 fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> AnnealingState {
     let mut solution = initial_solution;
     let mut best_solution = solution.clone();
@@ -472,14 +560,13 @@ fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> 
         }
 
         // 変形
-        let target = Coordinate::new(rng.gen_usize(0, N), rng.gen_usize(0, N));
-        let dir = rng.gen_usize(1, 3);
+        let neighbor = gen_neighbor(&mut rng);
 
-        if !solution.can_flip(target, dir) {
+        if !neighbor.can_apply(input, &solution) {
             continue;
         }
 
-        solution.flip(target, dir);
+        neighbor.apply(input, &mut solution);
 
         // スコア計算
         let new_score = solution.calc_score(input);
@@ -495,7 +582,7 @@ fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> 
                 update_count += 1;
             }
         } else {
-            solution.flip(target, dir);
+            neighbor.rollback(input, &mut solution);
         }
 
         valid_iter += 1;
