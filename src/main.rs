@@ -132,6 +132,7 @@ struct Input {
     people: Vec<Person>,
     sampled_people: Vec<Person>,
     sampled_houses: HashSet<Coordinate>,
+    used_count_dict: Vec<i64>,
 }
 
 impl Input {
@@ -182,12 +183,26 @@ impl Input {
             }
         }
 
+        let mut used_count_dict = vec![0; 30000];
+
+        for not_used in 0..30 {
+            for used in 0..30 {
+                let cost = 1000 * not_used + 223 * used;
+                if cost >= used_count_dict.len() {
+                    break;
+                }
+
+                used_count_dict[cost] = used as i64;
+            }
+        }
+
         Input {
             n,
             t,
             people,
             sampled_people,
             sampled_houses,
+            used_count_dict,
         }
     }
 }
@@ -302,7 +317,7 @@ fn get_judge() -> Box<dyn Judge> {
 }
 
 fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: usize) -> Action {
-    if turn < 100 {
+    if turn < 80 {
         return Action::Collaboration;
     }
 
@@ -425,14 +440,7 @@ impl AnnealingState {
 
         for &person in &input.sampled_people {
             let dist = distances[person.home][person.company];
-
-            for count in 0.. {
-                let remain = dist - 223 * count;
-                if remain % 1000 == 0 {
-                    score += 60 * count as i64;
-                    break;
-                }
-            }
+            score += 60 * input.used_count_dict[dist as usize];
         }
 
         score
@@ -673,6 +681,7 @@ mod judge {
                 people: vec![],
                 sampled_people: vec![],
                 sampled_houses: HashSet::new(),
+                used_count_dict: vec![],
             };
             let state = State::init();
             Self {
@@ -726,14 +735,7 @@ mod judge {
 
             for &person in &self.input.people {
                 let dist = distances[person.home][person.company];
-
-                for count in 0.. {
-                    let remain = dist - 223 * count;
-                    if remain % 1000 == 0 {
-                        self.state.money += 60 * count as i64;
-                        break;
-                    }
-                }
+                self.state.money += 60 * self.input.used_count_dict[dist as usize];
             }
 
             eprintln!("money: {}", self.state.money);
