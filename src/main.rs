@@ -299,7 +299,8 @@ fn main() {
     let mut state = State::init();
     let mut judge = get_judge();
     let input = judge.read_input();
-    let blueprint = annealing(&input, AnnealingState::new(), 1.8);
+    let mut blueprint = annealing(&input, AnnealingState::new(), 1.8);
+    blueprint.update_order();
 
     for turn in 0..input.t {
         judge.update_state(&mut state);
@@ -325,26 +326,7 @@ fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: us
         return Action::Money;
     }
 
-    let mut candidates = vec![];
-
-    for row in 0..N {
-        for col in 0..N {
-            let c = Coordinate::new(row, col);
-
-            for &dir in &[1, 2] {
-                if blueprint.map[c][dir] {
-                    candidates.push((c, c + ADJACENTS[dir]));
-                }
-            }
-        }
-    }
-
-    const CENTER: Coordinate = Coordinate::new(6, 6);
-    candidates.sort_unstable();
-    candidates.dedup();
-    candidates.sort_by_key(|(p, q)| p.dist(&CENTER).min(q.dist(&CENTER)));
-
-    for &(p, q) in &candidates {
+    for &(p, q) in &blueprint.candidates {
         let mut dir = !0;
 
         for d in 0..4 {
@@ -371,6 +353,7 @@ const MAX_HIGHWAY: usize = 70;
 struct AnnealingState {
     map: Map2d<[bool; 4]>,
     count: usize,
+    candidates: Vec<(Coordinate, Coordinate)>,
 }
 
 impl AnnealingState {
@@ -405,7 +388,11 @@ impl AnnealingState {
             }
         }
 
-        Self { map, count }
+        Self {
+            map,
+            count,
+            candidates: vec![],
+        }
     }
 
     fn calc_score(&self, input: &Input) -> i64 {
@@ -461,6 +448,46 @@ impl AnnealingState {
 
         self.map[target][dir] ^= true;
         self.map[next][inv(dir)] ^= true;
+    }
+
+    fn update_order(&mut self) {
+        let mut candidates = vec![];
+
+        for row in 0..N {
+            for col in 0..N {
+                let c = Coordinate::new(row, col);
+
+                for &dir in &[1, 2] {
+                    if self.map[c][dir] {
+                        candidates.push((c, c + ADJACENTS[dir]));
+                    }
+                }
+            }
+        }
+
+        let mut dists = Map2d::new(vec![std::i32::MAX / 2; N * N], N);
+        let mut queue = BinaryHeap::new();
+        let start = Coordinate::new(6, 6);
+        dists[start] = 0;
+        queue.push(Reverse((0, start)));
+
+        while let Some(Reverse((dist, c))) = queue.pop() {
+            if dist > dists[c] {
+                continue;
+            }
+
+            for dir in 0..4 {
+                let next = c + ADJACENTS[dir];
+                let next_cost = dist + if self.map[c][dir] { 1 } else { 5 };
+
+                if next.in_map(N) && dists[next].change_min(next_cost) {
+                    queue.push(Reverse((next_cost, next)));
+                }
+            }
+        }
+
+        candidates.sort_unstable_by_key(|&(p, q)| dists[p].min(dists[q]));
+        self.candidates = candidates;
     }
 }
 
