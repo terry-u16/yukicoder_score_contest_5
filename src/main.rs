@@ -377,16 +377,16 @@ impl AnnealingState {
     fn new() -> Self {
         let mut map = Map2d::new(vec![[false; 4]; N * N], N);
 
-        for &row in &[2, 6, 11] {
-            for col in 2..10 {
+        for &row in &[3, 6, 10] {
+            for col in 3..10 {
                 let c = Coordinate::new(row, col);
                 map[c][1] = true;
                 map[c + ADJACENTS[1]][3] = true;
             }
         }
 
-        for &col in &[2, 6, 11] {
-            for row in 2..10 {
+        for &col in &[3, 6, 10] {
+            for row in 3..10 {
                 let c = Coordinate::new(row, col);
                 map[c][2] = true;
                 map[c + ADJACENTS[2]][0] = true;
@@ -532,7 +532,7 @@ impl Neighbor for FlipTwo {
 
 fn gen_target(rng: &mut Xoshiro256) -> (Coordinate, usize) {
     loop {
-        let target = Coordinate::new(rng.gen_usize(0, N), rng.gen_usize(0, N));
+        let target = Coordinate::new(rng.gen_usize(2, N - 2), rng.gen_usize(2, N - 2));
         let dir = rng.gen_usize(1, 3);
 
         if !(target.row == N - 1 && dir == 2) && !(target.col == N - 1 && dir == 1) {
@@ -542,7 +542,7 @@ fn gen_target(rng: &mut Xoshiro256) -> (Coordinate, usize) {
 }
 
 fn gen_neighbor(rng: &mut Xoshiro256) -> Box<dyn Neighbor> {
-    if rng.gen_bool(0.05) {
+    if rng.gen_bool(0.2) {
         let (target, dir) = gen_target(rng);
         Box::new(FlipOne::new(target, dir))
     } else {
@@ -568,8 +568,8 @@ fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> 
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let temp0 = 3e3;
-    let temp1 = 3e2;
+    let temp0 = 1e4;
+    let temp1 = 1e3;
     let mut inv_temp = 1.0 / temp0;
 
     loop {
