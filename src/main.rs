@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::{collections::BinaryHeap, fmt::Display};
 
@@ -129,22 +130,48 @@ struct Input {
     n: usize,
     t: usize,
     people: Vec<Person>,
+    sampled_people: Vec<Person>,
+    sampled_houses: HashSet<Coordinate>,
 }
 
 impl Input {
     fn read_input() -> Input {
         let (n, t) = get!(usize, usize);
         let mut people = vec![];
+        let mut sampled_people = vec![];
+        let mut sampled_houses = HashSet::new();
 
-        for _ in 0..n {
+        for i in 0..n {
             let (r0, c0, r1, c1) = get!(usize, usize, usize, usize);
-            people.push(Person::new(
-                Coordinate::new(r0 - 1, c0 - 1),
-                Coordinate::new(r1 - 1, c1 - 1),
-            ));
+            let mut c0 = Coordinate::new(r0 - 1, c0 - 1);
+            let mut c1 = Coordinate::new(r1 - 1, c1 - 1);
+
+            if c0 > c1 {
+                std::mem::swap(&mut c0, &mut c1);
+            }
+
+            people.push(Person::new(c0, c1));
+
+            if i % 50 == 0 {
+                sampled_houses.insert(c0);
+            }
         }
 
-        Input { n, t, people }
+        for &person in &people {
+            if sampled_houses.contains(&person.home) {
+                sampled_people.push(person);
+            } else if sampled_houses.contains(&person.company) {
+                sampled_people.push(Person::new(person.company, person.home));
+            }
+        }
+
+        Input {
+            n,
+            t,
+            people,
+            sampled_people,
+            sampled_houses,
+        }
     }
 }
 
@@ -241,7 +268,6 @@ fn main() {
     let mut judge = get_judge();
     let input = judge.read_input();
     let blueprint = annealing(&input, AnnealingState::new(), 1.5);
-    eprintln!("{}", blueprint.count);
 
     for turn in 0..input.t {
         judge.update_state(&mut state);
@@ -354,35 +380,33 @@ impl AnnealingState {
         let mut distances = Map2d::new(vec![Map2d::new(vec![], N); N * N], N);
         let mut queue = BinaryHeap::new();
 
-        for row0 in 0..N {
-            for col0 in 0..N {
-                let mut dists = Map2d::new(vec![std::i32::MAX / 2; N * N], N);
-                queue.clear();
-                dists[Coordinate::new(row0, col0)] = 0;
-                queue.push(Reverse((0, Coordinate::new(row0, col0))));
+        for &start in input.sampled_houses.iter() {
+            let mut dists = Map2d::new(vec![std::i32::MAX / 2; N * N], N);
+            queue.clear();
+            dists[start] = 0;
+            queue.push(Reverse((0, start)));
 
-                while let Some(Reverse((dist, c))) = queue.pop() {
-                    if dist > dists[c] {
-                        continue;
-                    }
-
-                    for dir in 0..4 {
-                        let next = c + ADJACENTS[dir];
-                        let next_cost = dist + if self.map[c][dir] { 223 } else { 1000 };
-
-                        if next.in_map(N) && dists[next].change_min(next_cost) {
-                            queue.push(Reverse((next_cost, next)));
-                        }
-                    }
+            while let Some(Reverse((dist, c))) = queue.pop() {
+                if dist > dists[c] {
+                    continue;
                 }
 
-                distances[Coordinate::new(row0, col0)] = dists;
+                for dir in 0..4 {
+                    let next = c + ADJACENTS[dir];
+                    let next_cost = dist + if self.map[c][dir] { 223 } else { 1000 };
+
+                    if next.in_map(N) && dists[next].change_min(next_cost) {
+                        queue.push(Reverse((next_cost, next)));
+                    }
+                }
             }
+
+            distances[start] = dists;
         }
 
         let mut score = 0;
 
-        for &person in &input.people {
+        for &person in &input.sampled_people {
             let dist = distances[person.home][person.company];
 
             for count in 0.. {
@@ -431,7 +455,7 @@ fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> 
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let temp0 = 3e4;
+    let temp0 = 3e3;
     let temp1 = 3e2;
     let mut inv_temp = 1.0 / temp0;
 
@@ -492,7 +516,7 @@ fn annealing(input: &Input, initial_solution: AnnealingState, duration: f64) -> 
 mod judge {
     use std::{
         cmp::Reverse,
-        collections::BinaryHeap,
+        collections::{BinaryHeap, HashSet},
         io::{stdout, Write},
     };
 
@@ -543,6 +567,8 @@ mod judge {
                 n: 0,
                 t: 0,
                 people: vec![],
+                sampled_people: vec![],
+                sampled_houses: HashSet::new(),
             };
             let state = State::init();
             Self {
@@ -564,13 +590,16 @@ mod judge {
             eprintln!("[TURN {:3}]", self.turn);
 
             let mut distances = Map2d::new(vec![Map2d::new(vec![], N); N * N], N);
+            let mut queue = BinaryHeap::new();
 
-            for row0 in 0..N {
-                for col0 in 0..N {
+            for row in 0..N {
+                for col in 0..N {
+                    let start = Coordinate::new(row, col);
+
                     let mut dists = Map2d::new(vec![std::i32::MAX / 2; N * N], N);
-                    let mut queue = BinaryHeap::new();
-                    dists[Coordinate::new(row0, col0)] = 0;
-                    queue.push(Reverse((0, Coordinate::new(row0, col0))));
+                    queue.clear();
+                    dists[start] = 0;
+                    queue.push(Reverse((0, start)));
 
                     while let Some(Reverse((dist, c))) = queue.pop() {
                         if dist > dists[c] {
@@ -587,7 +616,7 @@ mod judge {
                         }
                     }
 
-                    distances[Coordinate::new(row0, col0)] = dists;
+                    distances[start] = dists;
                 }
             }
 
@@ -644,7 +673,7 @@ mod judge {
 pub mod grid {
     use std::ops::{Div, DivAssign, Mul, MulAssign};
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Coordinate {
         pub row: usize,
         pub col: usize,
