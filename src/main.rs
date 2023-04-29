@@ -164,7 +164,7 @@ impl Input {
             }
         }
 
-        const TARGET_COUNT: usize = 30;
+        const TARGET_COUNT: usize = 20;
         candidates.sort_unstable_by_key(|c| Reverse(counts[*c]));
         candidates.truncate(TARGET_COUNT);
 
@@ -299,7 +299,7 @@ fn main() {
     let mut state = State::init();
     let mut judge = get_judge();
     let input = judge.read_input();
-    let mut blueprint = annealing(&input, AnnealingState::new(), 1.85);
+    let mut blueprint = annealing(&input, AnnealingState::new(), 1.87);
     blueprint.update_order();
 
     for turn in 0..input.t {
@@ -322,7 +322,7 @@ fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: us
         return Action::Collaboration;
     }
 
-    if turn >= 350 || !state.can_construct() {
+    if turn >= 250 || !state.can_construct() {
         return Action::Money;
     }
 
