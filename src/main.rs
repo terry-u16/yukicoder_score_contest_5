@@ -299,7 +299,7 @@ fn main() {
     let mut state = State::init();
     let mut judge = get_judge();
     let input = judge.read_input();
-    let mut blueprint = annealing(&input, AnnealingState::new(), 1.8);
+    let mut blueprint = annealing(&input, AnnealingState::new(), 1.85);
     blueprint.update_order();
 
     for turn in 0..input.t {
@@ -347,7 +347,7 @@ fn get_action(input: &Input, state: &State, blueprint: &AnnealingState, turn: us
     Action::Money
 }
 
-const MAX_HIGHWAY: usize = 70;
+const MAX_HIGHWAY: usize = 65;
 
 #[derive(Debug, Clone)]
 struct AnnealingState {
